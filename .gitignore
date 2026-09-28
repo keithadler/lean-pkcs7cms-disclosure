@@ -1,0 +1,3 @@
+dotnet-repro/bin/
+dotnet-repro/obj/
+.DS_Store

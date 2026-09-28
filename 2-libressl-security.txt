@@ -1,0 +1,39 @@
+To: libressl-security@openbsd.org
+Subject: cms verify does not check the content-type attribute against eContentType
+
+Hello,
+
+LibreSSL's CMS verification (CMS_verify(), `openssl cms -verify`) accepts a SignedData message whose
+encapContentInfo.eContentType differs from the value of its signed content-type attribute. Because
+eContentType is not covered by the signature, anyone can change the content type of a validly signed message
+without the signing key, and it still verifies.
+
+RFC 5652 section 11.1: "The content-type attribute value MUST match the SignedData encapContentInfo
+eContentType value." The attribute is what authenticates eContentType.
+
+Reproduction (attached relabel-repro.sh; needs only the openssl command line and python3):
+
+    $ OPENSSL=/opt/homebrew/opt/libressl/bin/openssl sh relabel-repro.sh
+    original:
+    Verification successful
+    relabeled (eContentType 1.2.840.113549.1.7.5, content-type attribute still id-data):
+    Verification successful
+
+Versions: LibreSSL 4.3.2, and 3.3.6 as shipped with macOS.
+
+In the same test, LibreSSL also accepts signed attributes with no content-type attribute at all, or with two
+of them (RFC 5652 sections 5.3 and 11.1), and a countersignature among the signed attributes (section 11.4);
+those need the signer's key to produce.
+
+Impact: an application that verifies and then acts on the eContentType can be made to treat content signed
+as one type as another. It depends on the application; we have not found a specific exploitable one, and
+would rate it low.
+
+Suggested fix: when signed attributes are present, require exactly one content-type attribute and compare its
+value with eContentType during verification.
+
+Found by differential testing of seven CMS verifiers against a formal specification of RFC 5652 written in
+Lean (https://github.com/keithadler/lean-pkcs7cms). That repository does not mention this issue; we will wait
+for your go-ahead before publishing it. OpenSSL shows the same behavior and is being told separately.
+
+Keith Adler

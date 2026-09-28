@@ -1,0 +1,48 @@
+Submit at https://msrc.microsoft.com/report/vulnerability/new (per dotnet/runtime SECURITY.md).
+Attach the dotnet-repro folder (Program.cs, repro.csproj, signed.der, relabeled.der).
+
+Product: .NET, System.Security.Cryptography.Pkcs (SignedCms)
+
+Title: SignedCms.CheckSignature does not check the content-type attribute against eContentType
+
+Description:
+
+SignedCms.CheckSignature(verifySignatureOnly: true) accepts a SignedData message whose
+encapContentInfo.eContentType differs from the value of its signed content-type attribute. Because
+eContentType is not covered by the signature, anyone can change the content type of a validly signed
+message without the signing key, and CheckSignature still succeeds while SignedCms.ContentInfo.ContentType
+reports the new type.
+
+RFC 5652 section 11.1: "The content-type attribute value MUST match the SignedData encapContentInfo
+eContentType value." The attribute is what authenticates eContentType.
+
+Steps to reproduce:
+
+1. signed.der is an ordinary message signed with `openssl cms -sign -binary -md sha256 -nodetach`
+   (content-type attribute and eContentType both id-data, 1.2.840.113549.1.7.1).
+2. relabeled.der is the same file with one byte of eContentType changed, to 1.2.840.113549.1.7.5. The signed
+   attributes are untouched.
+3. `dotnet run -- signed.der relabeled.der` prints:
+
+       signed.der: eContentType 1.2.840.113549.1.7.1, signature valid
+       relabeled.der: eContentType 1.2.840.113549.1.7.5, signature valid
+
+Tested with System.Security.Cryptography.Pkcs 10.0.12 on .NET 10, and 11.0.0-rc.1.26425.128 on .NET 11 RC 1,
+on macOS.
+
+Impact: an application that verifies with SignedCms and then acts on ContentInfo.ContentType can be made to
+treat content signed as one type as another, with no key material. How much that matters depends on the
+application; we have not found a specific exploitable one and would rate it low.
+
+In the same testing SignedCms also accepted, among others: signed attributes with no content-type attribute
+or with two of them (RFC 5652 sections 5.3 and 11.1), a countersignature among the signed attributes (section
+11.4), an RSA signature one byte shorter than the modulus (RFC 8017 section 8.2.2; the same signature then has
+two encodings), and a trailing byte after the message. Those need the signer's key or are malleability rather
+than forgery.
+
+Suggested fix: when signed attributes are present, require exactly one content-type attribute and compare its
+value with ContentInfo.ContentType in CheckSignature.
+
+Found by differential testing of seven CMS verifiers against a formal specification of RFC 5652 written in
+Lean (https://github.com/keithadler/lean-pkcs7cms). That repository does not mention this issue; we will wait
+before publishing it. OpenSSL and LibreSSL show the same behavior and are being told separately.

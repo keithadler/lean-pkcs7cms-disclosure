@@ -1,0 +1,46 @@
+To: openssl-security@openssl.org
+Subject: CMS_verify does not check the content-type attribute against eContentType
+
+Hello,
+
+CMS_verify() (and `openssl cms -verify`) accepts a SignedData message whose encapContentInfo.eContentType
+differs from the value of its signed content-type attribute. Because eContentType is not covered by the
+signature, anyone can change the content type of a validly signed message without the signing key, and it
+still verifies.
+
+RFC 5652 requires the check: "The content-type attribute value MUST match the SignedData encapContentInfo
+eContentType value" (section 11.1), and the attribute must be present whenever signed attributes are
+(section 5.3). The attribute is what authenticates eContentType.
+
+In OpenSSL, crypto/cms/cms_sd.c sets the attribute from eContentType when signing
+(cms_set_si_contentType_attr), and crypto/cms/cms_att.c checks on verification that it occurs once with one
+value (CMS_ATTR_F_ONLY_ONE | CMS_ATTR_F_ONE_ATTR_VALUE | CMS_ATTR_F_REQUIRED_COND), but nothing compares its
+value with eContentType. CMS_SignerInfo_verify_content() compares only the message digest.
+
+Reproduction (attached relabel-repro.sh; needs only the openssl command line and python3):
+
+    $ OPENSSL=openssl sh relabel-repro.sh
+    original:
+    CMS Verification successful
+    relabeled (eContentType 1.2.840.113549.1.7.5, content-type attribute still id-data):
+    CMS Verification successful
+
+The script signs a message with `openssl cms -sign`, then changes one byte of eContentType (id-data to
+1.2.840.113549.1.7.5). The signed attributes, including content-type = id-data, are untouched.
+
+Versions: OpenSSL 3.6.4 (25 Aug 2026); the code is the same on master at 1e369089f4 (2026-09-27).
+
+Impact: an application that verifies with CMS_verify() and then acts on CMS_get0_eContentType() can be
+made to treat content signed as one type as another. How much that matters depends on the application
+(for example RFC 3161 timestamp tokens, RPKI signed objects, S/MIME, EST and CMP all dispatch on the content
+type); we have not found a specific exploitable application. The flaw needs no key material. We would rate
+it low, but leave the rating to you.
+
+Suggested fix: when signed attributes are present, compare the content-type attribute's value with
+eContentType (OBJ_cmp) during verification and fail on a mismatch, as GnuTLS does in verify_hash_attr().
+
+Found by differential testing of seven CMS verifiers against a formal specification of RFC 5652 written in
+Lean (https://github.com/keithadler/lean-pkcs7cms). That repository does not mention this issue; we will
+wait for your go-ahead before publishing it. LibreSSL shows the same behavior and is being told separately.
+
+Keith Adler
