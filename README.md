@@ -20,6 +20,8 @@ was reported publicly instead, the same day:
 - LibreSSL: https://github.com/libressl/portable/issues/1412
 - .NET: https://github.com/dotnet/runtime/issues/134822
 
+The texts of those three issues, as filed, are `issue-openssl.md`, `issue-libressl.md` and `issue-dotnet.md`.
+
 The private drafts say we would wait before publishing; that plan was replaced by the public reports above.
 
 ## Checking the sealed file
